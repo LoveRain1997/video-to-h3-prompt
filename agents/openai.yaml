@@ -1,0 +1,4 @@
+﻿interface:
+  display_name: "Video to H3 Prompt"
+  short_description: "Reverse-engineer a video into a ready-to-paste H3 prompt"
+  default_prompt: "Use $video-to-h3-prompt to reverse-engineer this video into a MiniMax H3 generation prompt."
