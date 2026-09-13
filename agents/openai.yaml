@@ -1,4 +1,4 @@
-﻿interface:
+agent:
   display_name: "Video to H3 Prompt"
-  short_description: "Reverse-engineer a video into a ready-to-paste H3 prompt"
-  default_prompt: "Use $video-to-h3-prompt to reverse-engineer this video into a MiniMax H3 generation prompt."
+  short_description: "Forensically reverse-engineer a reference video into a ready-to-paste MiniMax H3 prompt (T2VA/I2VA/FL2VA/L2VA/Ref2VA) via dense frame sampling, audio cross-validation, causal event-chain reconstruction, freeze-frame/manga gags, and coser replacement without plot change."
+  default_prompt: "Analyze the attached video and produce a complete MiniMax H3 prompt. Run the five-channel forensics (sparse grid + dense transition frames, spectrogram, RMS/BPM credibility), build a causal shot-by-shot event chain, separate live action / camera / edit-effects / sound layers, choose the correct H3 mode and template, then assemble every required field. If a coser/character swap is requested, change appearance only and append a replacement table. Save the result as a .md file next to the video and print the final ready-to-paste prompt block."

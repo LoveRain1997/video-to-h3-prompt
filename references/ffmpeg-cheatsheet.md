@@ -1,26 +1,28 @@
-﻿# FFmpeg Cheatsheet for Video Reverse-Engineering
+# FFmpeg Cheatsheet for Video Reverse-Engineering
 
-All commands assume PowerShell on Windows. Swap the loop style for bash on Unix.
+All commands assume **PowerShell on Windows** (backtick `` ` `` is the line-continuation). Swap loop style and `NUL`→`/dev/null` on bash. The whole first-pass pipeline is also wrapped in `scripts/forensic_probe.ps1`.
 
 ## Probe Video Metadata
 
-```bash
+```powershell
 ffprobe -v error -show_format -show_streams -of json "<video.mp4>"
 ```
 
-For a one-line summary:
+One-line summary:
 
-```bash
-ffprobe -v error -show_entries format=duration,bit_rate -show_entries stream=codec_name,width,height,r_frame_rate,nb_frames -of default=nw=1 "<video.mp4>"
+```powershell
+ffprobe -v error -show_entries format=duration,bit_rate `
+  -show_entries stream=codec_type,codec_name,width,height,r_frame_rate,nb_frames,sample_rate,channels `
+  -of default=nw=1 "<video.mp4>"
 ```
 
-## Extract Frames at Fixed Interval
+Six fields that drive later decisions: `duration` (final H3 duration, ±0.02), `width×height` (portrait vs landscape), `r_frame_rate`, `nb_frames` (duration×fps sanity), `codec_name`, `has_b_frames` (>0 → add `-noaccurate_seek` for cleaner seeks).
 
-```bash
-$interval = 0.2          # seconds between samples
-$count = 73              # number of frames to extract
-$out = "D:\path\frames"
+## Extract Frames at Fixed Interval (sparse skeleton pass)
 
+```powershell
+$interval = 0.2; $count = 73; $out = "D:\path\frames"
+New-Item -ItemType Directory -Force -Path $out | Out-Null
 for ($i=0; $i -le $count; $i++) {
   $t = "{0:F3}" -f ($i * $interval)
   ffmpeg -y -ss $t -i "<video.mp4>" -frames:v 1 `
@@ -28,48 +30,50 @@ for ($i=0; $i -le $count; $i++) {
 }
 ```
 
-Adjust:
+Interval by duration: <5s→0.2s; 5–10s→0.3–0.4s; 10–15s→0.15–0.2s; >15s→0.2s + targeted re-extracts at transitions. The single biggest quality lever is **re-extracting a missed transition at half the interval**.
 
-- `scale=iw/2:-1` → half resolution. Use `-1` for proportional, `360` to fix short side.
-- `-q:v 3` → JPEG quality (1 best, 31 worst). 3 is a good balance for visual review.
-- `-ss` before `-i` → fast seek, may be off by a frame. Use `-noaccurate_seek` if precision matters.
+## Continuous-Rate Extraction (dense pass over a transition)
 
-## Extract a Single Frame at Exact Time
-
-```bash
-ffmpeg -y -ss 4.500 -i "<video.mp4>" -frames:v 1 -q:v 2 "single.jpg"
+```powershell
+# whole clip at 2fps, width 480
+ffmpeg -y -i "<video.mp4>" -vf "fps=2,scale=480:-1" frames/f_%02d.jpg
+# a 2.5s ambiguous window at 4fps (8fps if needed)
+ffmpeg -y -ss 8.5 -t 2.5 -i "<video.mp4>" -vf "fps=4,scale=360:-1" seg/c_%02d.jpg
 ```
 
-## Extract a Range of Frames (Full Coverage)
+## Single Frame at Exact Time (full-resolution final check)
 
-```bash
-ffmpeg -y -i "<video.mp4>" -vf "fps=10,scale=iw/2:-1" -q:v 3 "frame_%04d.jpg"
+```powershell
+ffmpeg -y -ss 9.800 -i "<video.mp4>" -frames:v 1 -q:v 2 "key_9_8.jpg"
 ```
 
-`fps=10` gives one frame every 100 ms. Use `fps=5` or `fps=2` for sparser sampling on long videos.
+## Contact Sheet / Grid (read the whole timeline at once)
 
-## Dump Audio for Analysis
-
-```bash
-ffmpeg -y -i "<video.mp4>" -vn -ac 1 -ar 8000 -f wav "audio.wav"
+```powershell
+# 4x4 grid, yellow padding makes reading order obvious
+ffmpeg -y -framerate 1 -i frames/f_%02d.jpg `
+  -vf "scale=240:-2,tile=4x4:padding=4:color=yellow" grid_%03d.jpg
+# dense window 5x2
+ffmpeg -y -framerate 1 -i seg/c_%02d.jpg `
+  -vf "scale=200:355,tile=5x2:padding=3:color=yellow" seg/c_grid.jpg
 ```
 
-`-ac 1` mono, `-ar 8000` 8 kHz (small, fast to analyze, fine for volumedetect).
+More than 16 input frames → ffmpeg emits multiple `grid_001/002...` sheets.
 
-## Measure Audio Levels
+## Audio Dump + Spectrogram
 
-```bash
-ffmpeg -i "audio.wav" -af "volumedetect" -f null - 2>&1 | grep volume
+```powershell
+ffmpeg -y -i "<video.mp4>" -vn -ac 1 -ar 22050 audio.wav         # analysis grade
+ffmpeg -y -i audio.wav -lavfi showspectrumpic=s=1000x400:legend=1 spectrum.jpg
+ffmpeg -y -i "<video.mp4>" -vn -ac 1 -ar 8000 -f wav out8k.wav   # loudness grade
+ffmpeg -i out8k.wav -af "volumedetect" -f null NUL 2>&1 | Select-String volume
+python scripts/audio_probe.py audio.wav                          # RMS + BPM credibility
 ```
 
-Returns `mean_volume` and `max_volume` in dBFS.
+## Visual Difference Strip (auto-locate hard cuts)
 
-## Build a Visual Difference Strip
-
-Useful to spot cut frames automatically:
-
-```bash
-mkdir diff
+```powershell
+New-Item -ItemType Directory -Force -Path diff | Out-Null
 for ($i=1; $i -le 73; $i++) {
   $prev = $i - 1
   ffmpeg -y -i "f_$i.jpg" -i "f_$prev.jpg" `
@@ -77,31 +81,24 @@ for ($i=1; $i -le 73; $i++) {
 }
 ```
 
-Frames with very dark `diff/d_*.jpg` = identical (continuous). Frames with bright output = a hard cut.
+Nearly black `diff` = identical (continuous); bright output = a hard cut. Composition jump (angle/focal length) also reads as a cut; smooth push/pull/pan is camera movement, not a cut.
 
-## Extract Just the First and Last Frame
+## First and Last Frame (I2VA / L2VA anchors)
 
-```bash
-ffmpeg -y -i "<video.mp4>" -vf "select=eq(n\,0)" -frames:v 1 "first.jpg"
-ffprobe -v error -show_entries format=duration -of csv=p=0 "<video.mp4>" | ForEach-Object {
-  ffmpeg -y -ss $_ -i "<video.mp4>" -frames:v 1 "last.jpg"
-}
+```powershell
+ffmpeg -y -i "<video.mp4>" -vf "select=eq(n\,0)" -frames:v 1 first.jpg
+$dur = (ffprobe -v error -show_entries format=duration -of csv=p=0 "<video.mp4>")
+ffmpeg -y -ss $dur -i "<video.mp4>" -frames:v 1 last.jpg
 ```
-
-## Concatenate Frames into a Contact Sheet
-
-```bash
-ffmpeg -y -i "f_%d.jpg" -vf "tile=6x4" -frames:v 1 "contact_sheet.jpg"
-```
-
-`tile=6x4` lays 6 columns × 4 rows. Adjust to match the number of frames.
 
 ## Common Failure Modes
 
 | Symptom | Cause | Fix |
 |---|---|---|
 | `q=0` and `-q:v` ignored | Output is `.png` | Use `.jpg` |
-| Black frames at start | `-ss` placement issue | Move `-ss` after `-i` for accuracy, or use `-noaccurate_seek` |
-| `Permission denied` writing frames | Directory missing | `New-Item -ItemType Directory -Force -Path $out` first |
-| Frames off by 1 s | `-ss` is doing input seek instead of output seek | Add `-noaccurate_seek` or move `-ss` after `-i` |
-| Audio dump has no sound | Source has no audio stream | Check with `ffprobe ... -show_streams`; if no `codec_type: audio`, skip audio analysis |
+| Black frames at start | `-ss` seek placement | Move `-ss` after `-i` for accuracy, or `-noaccurate_seek` |
+| `Permission denied` writing frames | Directory missing | `New-Item -ItemType Directory -Force` first |
+| Frames off by ~1s | Input seek vs output seek | Add `-noaccurate_seek` or move `-ss` after `-i` |
+| Audio dump silent | No audio stream | Check `ffprobe -show_streams`; skip audio analysis if no `codec_type: audio` |
+| Grid only shows first 16 frames | tile fixed at 4x4 | Use `grid_%03d.jpg` pattern to emit multiple sheets |
+| Path with spaces fails | Missing quotes | Always quote full paths |

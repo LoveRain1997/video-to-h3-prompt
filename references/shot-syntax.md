@@ -1,6 +1,6 @@
-﻿# H3 Ref2VA Shot Syntax Reference
+# H3 Ref2VA Shot Syntax Reference
 
-Concise skeleton for the `detailed_description` section. Reuse this when filling out any Ref2VA prompt.
+Concise skeleton for the `detailed_description` section. Reuse this when filling out any Ref2VA prompt (video + one or more reference images/videos/audio). For T2VA / I2VA / FL2VA / L2VA use the 14-field template in `02-h3-field-mapping.md`. The forensic workflow (dense sampling, audio cross-validation, causal event chain, freeze-frame gags) that *produces* the content lives in `SKILL.md` and `01-forensics-commands.md`; this file governs how that content is written into Ref2VA fields.
 
 ## Six-Section Skeleton
 
@@ -25,7 +25,7 @@ The target video uses <one-line style description>.
 [Shot 2] At 00:XX.XXX, <transition verb> <rest of shot with 6 elements>.
 
 overall_soundscape:
-<ambience + physical SFX + non-verbal human sounds across the whole video>.
+<ambience + physical SFX + non-verbal human sounds across the whole video; freeze-frame post-SFX belongs here>.
 
 non_diegetic_music:
 <audience-only score: instrumentation + tempo + dynamics> | N/A
@@ -40,7 +40,7 @@ Every `[Shot N]` block must cover all six. Missing one is the most common reason
 | 1 | Composition | `a wide shot` / `a medium close-up` / `a tight close-up` / `an over-the-shoulder shot` |
 | 2 | Subject appearance + position | `<Subject 1>, the <identity> with <key features>, <position phrase>` |
 | 3 | Environment + lighting | `<setting> with <light source + quality + direction>` |
-| 4 | Action + state change | `<Subject 1> <present-tense action> ... <visible state change>` |
+| 4 | Action + state change | `<Subject 1> <present-tense action> ... <visible state change>` (trigger → action → result, diegetic sound embedded) |
 | 5 | Camera movement | `The camera pushes in with small amplitude at slow speed` / `holds steady` / `pulls out` |
 | 6 | Current sound | `<short onomatopoeic or descriptive cue>` |
 
@@ -59,6 +59,7 @@ Rules:
 - `0.00` is forbidden on `[Shot 1]` — `[Shot 1]` is the only shot without a timestamp.
 - Each cut time must be **strictly greater than the previous** and **less than or equal to `duration`**.
 - Final shot ends implicitly at `duration`; no need to repeat it.
+- A freeze-frame gag is NOT a cut: keep it inside the same shot as a `FREEZE-FRAME GAG n` event with in-point, duration and snap-back (see `03-edit-effects.md`).
 
 ## Transition Verb Library
 
@@ -81,7 +82,7 @@ Pick one per cut; do not mix:
 At 00:02.500 <Subject 1> <next action>. ...
 ```
 
-Tie every emote or beat with `At 00:XX.XXX` clauses inside the single `[Shot 1]` block.
+Tie every emote or beat with `At 00:XX.XXX` clauses inside the single `[Shot 1]` block. Most prank/UGC reversals are single-shot with freeze gags, not multi-cut.
 
 ## Camera Movement Vocabulary
 
@@ -91,9 +92,10 @@ Tie every emote or beat with `At 00:XX.XXX` clauses inside the single `[Shot 1]`
 - `the camera trucks right with small amplitude at slow speed` — lateral slide
 - `the camera holds steady` — locked-off
 - `the camera pans right with small amplitude at slow speed` — horizontal rotation
-- `the camera tilts up with small amplitude at slow speed` — vertical rotation
+- `the camera tilts down/up with small amplitude at medium speed` — vertical rotation
+- handheld first-person: `subtle organic handheld shake throughout, never gimbal-smooth`
 
-Always quantify amplitude (none / small / medium / large) and speed (slow / moderate / fast).
+Always quantify amplitude (none / small / medium / large) and speed (slow / moderate / fast), and state the motivation for every move.
 
 ## Subject Opening Pattern
 
@@ -116,3 +118,13 @@ Pick the right tag for each piece of reusable content:
 | `<Audio N>` | An audio signal that is copied or referenced for voice / music / ambience |
 
 Once assigned, the label must mean the **same thing** in every section. Renaming, aliasing, or implicit reuse is a hard error.
+
+## "Universal Picture 1" Variant
+
+When one reference image defines both character and scene, use:
+
+```
+<Picture 1> is the universal visual anchor for the entire target video. It defines not only <Subject 1>'s appearance, costume, hair, and accessories, but also the scene's compositional layout, camera angle, lighting direction, color palette, prop placement, and background environment. Whenever the target video needs to decide what the room, props, window light, wall tones, or surrounding atmosphere look like, it must follow <Picture 1>.
+```
+
+Mark retention as `(governs the entire visual look)` and open shots as `framed and lit as defined by <Picture 1>`.
