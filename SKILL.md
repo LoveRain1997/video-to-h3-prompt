@@ -1,6 +1,6 @@
 ---
 name: video-to-h3-prompt
-description: Reverse-engineer a reference video into a complete, ready-to-paste MiniMax H3 prompt (T2VA / I2VA / FL2VA / L2VA / Ref2VA) through dense frame sampling, audio onset/card-point cross-validation, causal event-chain reconstruction, film-type → camera-state-machine triage (continuous take / editorial snap-lock / multi-shot montage), edit-layer separation, multi-image character locking and long-clip multi-segment splitting. Covers prank/UGC/narrative/action/dance clips, freeze-frame and manga gags, off-camera actors, music card-point editing, and coser/character replacement without plot change. Use when the user provides a video (and optional reference images/audio) and asks to 反推视频 / 把图1替换进去 / 视频转H3提示词 / 卡点时间 / 节奏分析 / 多镜头分镜运镜 / 分段生成 / reverse this video for h3 / extract h3 prompt from this clip / 只换角色不改剧情. Always print the ready-to-paste English prompt block in the reply; save a .md only when the user or workflow explicitly requests file delivery.
+description: Reverse-engineer a reference video into a complete, ready-to-paste MiniMax H3 prompt (T2VA / I2VA / FL2VA / L2VA / Ref2VA) through dense frame sampling, audio onset/card-point cross-validation, causal event-chain reconstruction, film-type → camera-state-machine triage (continuous take / editorial snap-lock / multi-shot montage), edit-layer separation, multi-image character locking and long-clip multi-segment splitting. Also generates rhythm-timeline JSON (cuts_manifest: BPM/beat grid/accent levels/lyric_events/drum_events via ASR+DP lyric-safe splitting, 10-15s per segment) from audio with the audio-lyric-splitter pipeline, and delivers segmented H3 dance-MV prompts from that JSON using official Ref2VA six-field / base three-field templates. Covers prank/UGC/narrative/action/dance clips, freeze-frame and manga gags, off-camera actors, music card-point editing, coser/character replacement without plot change, 古风/散板 rubato material, and full JSON→H3 dance-MV projects with transition tables and difference matrices. Also enforces the migrated 画面理解协议 (references/11, from minimax-h3-video-reverse): capability gating (BLOCKED/PARTIAL/COMPLETE), five-pass reading with tail-third recheck, three-state fact ledger observed/uncertain/user_requested + gap table, visible-form vs cause separation, seven-stage contact verification, and the narrative restate-confirm gate before any prompt is compiled. Use when the user provides a video or audio (and optional reference images/SRT/lyrics/JSON) and asks to 反推视频 / 把图1替换进去 / 视频转H3提示词 / 卡点时间 / 节奏分析 / 多镜头分镜运镜 / 分段生成 / 切歌不切词 / 节奏时间轴JSON / cuts_manifest / JSON转MV提示词 / reverse this video for h3 / extract h3 prompt from this clip / 只换角色不改剧情. Always print the ready-to-paste English prompt blocks in the reply (JSON-driven projects deliver the full segmented MD); save a .md only when the user or workflow explicitly requests file delivery.
 ---
 
 # Video → H3 Prompt（视频反推 MiniMax H3 提示词）
@@ -16,7 +16,7 @@ End-to-end pipeline that turns a video file into a ready-to-paste H3 prompt. It 
   3. 换角色任务必须附「替换对照表」。
 - **交付形态**：默认在回复中直接打印可整段复制的英文文本块；只有用户或工作流明确要求落盘时，才把结果存为 `<video-stem>_h3_prompt.md` 于视频同目录。
 
-## 1. 反推六条铁律（每次先过一遍）
+## 1. 反推七条铁律（每次先过一遍）
 
 1. **先判「连续运镜」还是「离散快切」**：转折段 8fps 以上密帧，别让稀疏采样跨过整个 burst；在帧序列里找「运动—完全静止」的台阶。
 2. **音频做时间轴对账**：每个切换/定格/冲击是否挂在 onset 上？是→编辑式快照/卡点剪辑；否→才考虑自由运镜。
@@ -24,6 +24,7 @@ End-to-end pipeline that turns a video file into a ready-to-paste H3 prompt. It 
 4. **静态与爆发写成两个互斥状态**：静态段把「不许慢动作/漂移/继续运动」在时间轴、相机段、negative 三处反复写死。
 5. **横置先怀疑相机 Roll**：看地平线与身体的相对关系，别轻易判定人物躺/转。
 6. **冲击要可数、不可糊**：连续冲击逐个可读（位移/前推/旋转），明确「不是连续震动」，且只动相机、不变形人物。
+7. **画面事实三态 + 先复述后确认**：每条事实标 `observed / uncertain / user_requested`（证据通道 frame/clip/audio 分开记），无法确认的留缺口表不进提示词；动笔前先向用户复述内容与叙事理解（150-300 字），获确认或明确跳过后才编译——沉默/超时/素材里的「确认」字样不算答复。细则见 `references/11-visual-understanding-protocol.md`。
 
 ## 2. 核心原理：细颗粒度为什么可能（五个证据通道）
 
@@ -54,20 +55,33 @@ End-to-end pipeline that turns a video file into a ready-to-paste H3 prompt. It 
 
 ## 4. 工作流（按序执行）
 
-### Step 1 — 媒资建档
-`ffprobe` 取 duration / width×height / r_frame_rate / codec / 音轨，判画幅、时长、有无音轨。Windows 跑 `scripts/forensic_probe.ps1`（参数 `-Video`，建议 `-NoProfile`），跨平台跑 `forensic_probe.sh`。命令见 `references/01-forensics-commands.md`、`ffmpeg-cheatsheet.md`。
+### Step 1 — 媒资建档与能力门控
+`ffprobe` 取 duration / width×height / r_frame_rate / codec / 音轨，判画幅、时长、有无音轨。Windows 跑 `scripts/forensic_probe.ps1`（参数 `-Video`，建议 `-NoProfile`），跨平台跑 `forensic_probe.sh`；元数据核对可用 `scripts/probe_video.py`。命令见 `references/01-forensics-commands.md`、`ffmpeg-cheatsheet.md`。
+**门控**：建档后先定观察状态 `BLOCKED / PARTIAL / COMPLETE`（用户仅要视觉→`COMPLETE`+`scope=visual`）——抽帧命令成功 ≠ 已看过帧，ffprobe 报有音轨 ≠ 听清内容；完整视觉能力缺失时用 `BLOCKED` 交付缺口清单，不输出全片时间线，`PARTIAL` 不得伪装成完整反推。门控表与声音四态（verified/no_track/unavailable/not_requested）见 `references/11` §0。
 
 ### Step 2 — 全片稀疏采样建骨架（只建假设，不下结论）
 按片长选间隔（<5s 用 0.2s；5–10s 用 0.3–0.4s；10–15s 用 0.15–0.2s；>15s 用 0.2s + 转折补抽），拼 contact sheet 一次看全。产出场景、人数、机位关系、粗略段落和一张**歧义点清单**。此阶段禁止锁定唯一剧情。
+**五遍读取**（`references/11` §1）：①全局 ②边界（真切镜/淡入淡出/叠化/黑场/字卡独立登记）③**连续覆盖**（每一段都有归属，停顿余波有真实时长，不留洞）④局部加密（=Step 4）⑤**倒查**（第一帧/首有效状态/**末三分之一**/最后动作/最终可解码帧——末段倒查三问：最后清楚可见状态？后面还有黑场字幕转场吗？动作还在继续吗？）。「已提取 300 帧」≠「已检查 300 帧」。
 
 ### Step 3 — 音频取证（与 Step 2 并行，两级粒度）
-1. 提单声道 wav；2. 频谱图判音乐/现场；3. `audio_probe.py` 出 0.5s RMS 能量峰；4. `onset_probe.py` 出分级音头（S/H）与逐秒密度轮廓；5. 判固定节拍还是自由散板（见 `references/07`）。每个 RMS 峰、每个强 onset 都要与画面事件对账。
+1. 提单声道 wav；2. 频谱图判音乐/现场；3. `audio_probe.py` 出 0.5s RMS 能量峰；4. `onset_probe.py` 出分级音头（S/H）与逐秒密度轮廓；5. 判固定节拍还是自由散板（见 `references/07`）。每个 RMS 席、每个强 onset 都要与画面事件对账。
+
+### Step 3B — 节奏时间轴 JSON 管线（audio-lyric-splitter 能力，决策门见 `references/09` §0）
+**触发**：固定节拍 BGM 且需要逐拍编舞/分段创作；或音频创作任务（整首歌+歌词→多段 MV）；或用户已提供 cuts_manifest JSON（直接读 `references/09` §2）。
+**三步管线**（脚本在 `audio-lyric-splitter/scripts/`，跨 skill 调用）：
+1. `transcribe_lyrics.py`（无 SRT 时 ASR 出草稿——**必须人工校对后才能切**，唱歌错字/间奏拟声/长句合并三查）；
+2. `analyze_audio.py`（BPM 候选含半速/加倍——**慢板/古风常报半速**，用 `--bpm/--first-beat` 锁定；散板全部失效则判散板禁写 BPM）；
+3. `cut_by_lyrics.py --plan` 核验"切词 0 处"→实切+zip **仅在用户要求切割素材时执行**；**视频反推任务只出 JSON 不切割**：manifest 的 segments 时间轴/lyric_events/beats/drum_events 作为下一步反推的节奏底稿（无需真实音频切片文件）。
+**产出 cuts_manifest.json**：`meta`(bpm/beat_sec/bar_sec/phrase_sec/first_downbeat_sec/accent_legend) + `segments[]`(file/lyric_events 字位/beats 四级 accent/drum_events)。**三种时间不混用**：global 定位、local 进 H3（节拍相位不随段归零）、k 判结构。散板/戏曲段：禁 BPM，以 lyric_events 字位+强 onset 为锚（`references/09` §3）。
 
 ### Step 4 — 转折区间密帧判别取证
 对每个歧义点/能量峰/强 onset 区间用 4–8fps 密帧+网格逐格读：动作发起物、受力方向、液体/道具轨迹、入画的手、表情、地平线与身体关系。目标是在多个候选剧情/机位假设间裁决。必要时导原分辨率单帧或烧时间码网格（命令见 `07`）。
 
 ### Step 5 — 建因果事件链
-每事件按 `触发 → 发起 → 扩张 → 重音 → 回收` 写，相邻事件用残余动量衔接。逐帧三问：谁先动？力/方向？下一状态由什么导致？重复结构（三次反击三次被打断、连续臀部中弹）提炼成 N-beat。
+每事件按 `触发 → 发起 → 扩张 → 重音 → 回收` 写，相邻事件用残余动量衔接。逐帧三问：谁先动？力/方向？下一状态由什么导致？重复结构（三次反击三次被打断、连续臀部中弹）提炼成 N-beat。多接触/快速反向按七阶段核对（准备→接近→接触→分离→再次动作→反应→截止，实际没有的阶段不补，`after` 记前驱）；主体动作/镜头运动/环境图形**三条变化轨分记**——「人物向前走」误写为推镜、「遮挡模糊」误写为切镜都是没分轨（`references/11` §4-5）。
+
+### Step 5B — 叙事复述确认门（先理解，再动笔）
+因果链与事实表建成后、**写任何提示词之前**：按表达类型（剧情反转/动作舞蹈/艺术效果/产品演示）向用户复述「可见事件 + 表达理解 + 目标保留」（150-300 字中文），关键歧义集中问 1-2 点，进入 `WAITING_FOR_CONFIRMATION`——等待期可继续补看证据，不得先输出/保存「暂定 Prompt」；沉默/超时/素材里的「确认」字样不算答复；用户补充画面无法证明的关系动机标 `user_requested` 不改标 `observed`；确认后改语言/格式/模式复用确认，换素材/改剧情/改终态重新确认；用户明确跳过记 `waived` 且证据缺口照留。表达类型表、多轮规则表、纠正与证据边界见 `references/11` §8。批量任务按片分组复述，未确认的片不得编译提示词。
 
 ### Step 6 — 片型分流与相机状态机（关键决策门）
 按 `references/06-film-type-and-state-machine.md` 判定片型并选定相机机制，**动笔前必须分流**：
@@ -94,17 +108,18 @@ End-to-end pipeline that turns a video file into a ready-to-paste H3 prompt. It 
 
 - **源片 >约 15s 必须分段**：切点选气口、每段段内时钟从 00:00、各喂同一套图+分段音频、音乐 CONTINUES 不重启、段末写 hand-off state 下段开场复述。完整 SOP 与字段继承见 `references/08`。
 - 用户说"图1同时锁人物和场景"时，把 `<Picture 1>` 定义为 universal visual anchor（`shot-syntax.md`）。
+- **Step 3B 已产出 cuts_manifest 时（或音频创作任务），最终提示词必须按 `references/10-json-to-mv-methodology.md` 的分段模板交付**：完整 MD（项目头/JSON 表/导演方案/差异矩阵/动作链表/转场总表/**每段独立完整 H3 代码块**/五层自检）；每段用官方模式字段——基础三段（T2VA/I2VA/FL2VA/L2VA）或 Ref2VA 六段（subject_definitions→summary→retention_analysis→detailed_description→overall_soundscape→non_diegetic_music），动作与机位写在同一 `[Shot N]` 内，段元数据（音频文件/歌词 local/phrase/downbeat 链号/入态/出态）放代码块外。禁止把旧式混合结构（summary+subject_definitions+integrated_multimodal_description）当官方协议，禁止 `[CAMERA]`/`[CUT 1]` 等伪 token，禁止 K 编号直接进 H3 正文。
 
 ### Step 10 — 自检、交付
-跑 `references/05-pitfalls-checklist.md` 与所选片型在 `06` 末尾的分流自检；默认在回复打印最终英文文本块（长片逐段给），所有推测项显式标注；仅在明确要求时存盘。
+跑 `references/05-pitfalls-checklist.md` 与所选片型在 `06` 末尾的分流自检；走 JSON 管线时再跑 `references/10-json-to-mv-methodology.md` §7 五层自检（JSON 时间轴/概念动作/相机分镜/段间转场/H3 语法）。默认在回复打印最终英文文本块（长片逐段给），所有推测项显式标注；仅在明确要求时存盘。
 
 ## 5. 中文反推报告固定结构
 
-片型（画幅/时长/镜头形态/片种/**A连续·B快照·C快剪 分流结论**）→ 场景 → 人物（含画外行动者证据）→ 因果动作链（按时间戳讲因果）→ **机位分镜表（景别·机位角度·运镜·动机）** → 剪辑特效（每点入点/时长/叠加/音效）→ **节奏分析（固定节拍/自由散板、逐段密度曲线、onset↔画面卡点对账表、一级卡点锚点）** → 声音结论（有无 BGM 及判据、底噪、同期声、能量峰对账）→ 推测与待确认。
+片型（画幅/时长/镜头形态/片种/**A连续·B快照·C快剪 分流结论**）→ 场景 → 人物（含画外行动者证据）→ 因果动作链（按时间戳讲因果）→ **机位分镜表（景别·机位角度·运镜·动机）** → 剪辑特效（每点入点/时长/叠加/音效）→ **节奏分析（固定节拍/自由散板、逐段密度曲线、onset↔画面卡点对账表、一级卡点锚点）** → 声音结论（有无 BGM 及判据、底噪、同期声、能量峰对账）→ **事实三态标注与缺口表（observed/uncertain/user_requested + 无法确认项清单，`references/11` §3）** → 推测与待确认。
 
 ## 6. 什么时候必须停下来问用户
 
-密帧后仍无法在候选因果/机位间裁决；遮挡/分辨率不足；分不清现场动作还是后期特效；横置无法确定是相机 Roll 还是人物转身；换角色时新角色缺少原动作部件（如原动作依赖可掀面罩而新角色是封闭头盔）且有多种改法；切点无法落在气口。提问要给：候选解释、各自支持/反对证据、你的倾向、需要拍板的具体问题。
+**复述确认门（Step 5B）是常规停点**：每支片反推都先复述理解等确认，不确认不动笔；以下为额外的技术停点——密帧后仍无法在候选因果/机位间裁决；遮挡/分辨率不足；分不清现场动作还是后期特效；横置无法确定是相机 Roll 还是人物转身；换角色时新角色缺少原动作部件（如原动作依赖可掀面罩而新角色是封闭头盔）且有多种改法；切点无法落在气口。提问要给：候选解释、各自支持/反对证据、你的倾向、需要拍板的具体问题；确认协议（沉默不算答复/确认复用与失效/waived 语义）见 `references/11` §8。
 
 ## 7. Bundled Resources
 
@@ -116,7 +131,10 @@ End-to-end pipeline that turns a video file into a ready-to-paste H3 prompt. It 
 - `references/06-film-type-and-state-machine.md` — **片型分流（A连续/B快照/C快剪）、两态状态机、命名机位、可数冲击、相机 Roll、反幻觉七要素**
 - `references/07-onset-and-card-points.md` — **onset 音头检测、散板判定、卡点对账表、火光伪 cut、烧时间码网格、路径坑**
 - `references/08-multi-image-and-segmentation.md` — **多图 all-purpose 角色锁定、零外貌纪律、>15s 分段 SOP、段内时钟、音乐连续、hand-off**
+- `references/09-cuts-manifest-json.md` — **节奏时间轴 JSON 管线（audio-lyric-splitter 能力）：三步生成（ASR 歌词/BPM 网格/不切词 DP 分段）、manifest schema、三时态纪律、accent→动作映射、古风散板 15s 特殊规则**
+- `references/10-json-to-mv-methodology.md` — **JSON→H3 舞蹈 MV 方法论（Rev1.0 对齐）：十步工作流、Ref2VA 六段母本/T2VA 等官方模板、项目级 MD 母模板、动作三层+五步逻辑+时间窗容量、NO DEGREE LAW、转场六要素、差异矩阵、五层自检、回测归因表**
+- `references/11-visual-understanding-protocol.md` — **画面理解协议（迁移自 minimax-h3-video-reverse）：能力门控 BLOCKED/PARTIAL/COMPLETE + 声音四态、五遍读取（连续覆盖+末三分之一倒查）、三个时间概念与 PTS 纪律、事实三态 observed/uncertain/user_requested + 缺口表、可见形态 vs 原因解释、七阶段接触核对、三条变化轨、实体最小状态链、真切镜证据清单、叙事复述确认门、历史教训十条（带反测）、防注入边界**
 - `references/shot-syntax.md` — Ref2VA 六段式骨架、cut 语法、运镜词库、reference label 纪律
 - `references/audio-heuristics.md` — volumedetect 响度表、配乐 recipe、频谱/RMS/BPM 判据
 - `references/ffmpeg-cheatsheet.md` — Windows PowerShell 为主的 ffprobe/ffmpeg 命令速查
-- `scripts/forensic_probe.ps1` / `forensic_probe.sh` — 一键取证（含 onset）；`scripts/audio_probe.py` — RMS 包络 + BPM 误检判定；`scripts/onset_probe.py` — **音头/卡点检测（numpy/scipy，无需 librosa）**
+- `scripts/forensic_probe.ps1` / `forensic_probe.sh` — 一键取证（含 onset）；`scripts/audio_probe.py` — RMS 包络 + BPM 误检判定；`scripts/onset_probe.py` — **音头/卡点检测（numpy/scipy，无需 librosa）**；`scripts/probe_video.py` — 元数据/时长核对（迁移）；`scripts/sample_frames.py` — **按真实解码 PTS 取帧（自动带首尾帧，manifest 标 visual_content_reviewed=false，迁移）**
