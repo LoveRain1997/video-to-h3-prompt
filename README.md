@@ -12,7 +12,7 @@ Forensically reverse-engineer a reference video into a complete, ready-to-paste 
 - **Causal event-chain reconstruction** — trigger → action → reaction for every state change; off-camera actors (a sleeve, a hand, a scooter fairing) are tracked as real agents instead of ignored clutter.
 - **Edit-layer separation** — freeze-frame gags, white flashes, manga overlays, RGB-glitch and energy-burst effects and their post-SFX go to `editing` / `overall_soundscape`, never mistaken for on-set action.
 - **Multi-image locking & long-clip segmentation** — `<Picture 1>` locks character 1, `<Picture 2>` locks character 2 (identity+costume only; environment/props stay text, zero appearance prose); clips over ~15s split into segments with per-segment clocks, non-restarting music, and hand-off states.
-- **All five H3 modes** — T2VA / I2VA / FL2VA / L2VA use the 14-field template; Ref2VA uses the six-section template with `<Subject>/<Picture>/<Video>/<Audio>` label discipline.
+- **All five H3 modes, official-anchored** — T2VA / I2VA / FL2VA / L2VA and Ref2VA final blocks follow the bundled official h3-prompt-writing guides (`base-en.txt` / `ref-en.txt`): exact field names, section order, reference-label discipline, speaker `(Sx)` IDs with `<scenetrans>`/`<cutoff>`, the four audio relationship markers (`fully_copy / partially_copy / reference / weak_reference`), and the official camera-motion vocabulary; the internal 14-field sheet is an assembly scaffold that folds into the official fields.
 - **Coser / character replacement without plot change** — swap appearance only, run action-compatibility checks, tier prop inclusion, translate anime designs into real-human cosplay, and emit a replacement table.
 
 ## The seven reusable checks
@@ -49,6 +49,9 @@ video-to-h3-prompt/
 │   ├── 09-cuts-manifest-json.md      # rhythm-timeline JSON pipeline: ASR/BPM grid/lyric-safe DP, manifest schema, rubato rules
 │   ├── 10-json-to-mv-methodology.md  # JSON -> segmented dance-MV methodology: Ref2VA six-field templates, NO DEGREE LAW, five-layer self-check
 │   ├── 11-visual-understanding-protocol.md # capability gating, five-pass reading, fact ledger + gap table, restate-confirm gate, 10 lessons
+│   ├── 12-h3-writing-official-bridge.md # official-guides routing, speaker (Sx) / <scenetrans> / <cutoff>, audio four markers, 14-field folding
+│   ├── base-en.txt                   # OFFICIAL H3 writing guide (T2VA/I2VA/FL2VA/L2VA structure, camera vocab, cases) — from h3-prompt-writing
+│   ├── ref-en.txt                    # OFFICIAL full-reference format guide (Ref2VA six sections, label defs, audio markers, example) — from h3-prompt-writing
 │   ├── shot-syntax.md                # Ref2VA six-section skeleton, cut syntax, camera vocabulary
 │   ├── audio-heuristics.md           # spectrogram/RMS/BPM + volumedetect -> music recipe table
 │   └── ffmpeg-cheatsheet.md          # PowerShell-first ffprobe/ffmpeg command reference
